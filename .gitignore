@@ -1,0 +1,44 @@
+# Environments
+venv/
+.venv/
+env/
+ENV/
+.env
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node & Frontend
+node_modules/
+dist/
+build/
+.vite/
+.eslintcache
+
+# Database & SQLite
+*.db
+*.sqlite
+*.sqlite3
+ibvap.db
+
+# AI Models & Large Files (Keep directories via .gitkeep)
+data/models/*
+!data/models/.gitkeep
+data/videos/*
+!data/videos/.gitkeep
+data/evidence/*
+!data/evidence/.gitkeep
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
