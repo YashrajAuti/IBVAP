@@ -48,6 +48,7 @@ export class IBVAPWebSocketClient {
   private onMessageCallback: (msg: WSMessage) => void;
   private isConnected: boolean = false;
   private isIntentionalDisconnect: boolean = false;
+  private connTimeout: any = null;
 
   constructor(url: string, onMessage: (msg: WSMessage) => void) {
     this.url = url;
@@ -56,10 +57,24 @@ export class IBVAPWebSocketClient {
 
   public connect() {
     this.isIntentionalDisconnect = false;
+
+    // Detect cloud preview (e.g. Vercel) or remote hosting where local backend port 8000 is unavailable
+    const isCloudHost = typeof window !== 'undefined' && 
+      !['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname);
+
+    if (this.connTimeout) clearTimeout(this.connTimeout);
+    this.connTimeout = setTimeout(() => {
+      if (!this.isConnected && !this.isIntentionalDisconnect) {
+        console.warn('Backend WebSocket not ready within timeout, initializing standalone telemetry');
+        this.startSimulation();
+      }
+    }, isCloudHost ? 300 : 1500);
+
     try {
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {
+        if (this.connTimeout) clearTimeout(this.connTimeout);
         this.isConnected = true;
         this.stopSimulation();
         console.log('✅ Connected to IBVAP Live WebSocket Server:', this.url);
@@ -109,7 +124,7 @@ export class IBVAPWebSocketClient {
 
     const cameras = ['CAM-NORTH-01', 'CAM-WEST-02', 'CAM-PARKING-03'];
 
-    this.simInterval = setInterval(() => {
+    const emitStep = () => {
       if (this.isConnected || this.isIntentionalDisconnect) {
         this.stopSimulation();
         return;
@@ -169,7 +184,11 @@ export class IBVAPWebSocketClient {
 
         this.onMessageCallback(framePayload);
       });
-    }, 120);
+    };
+
+    // Emit initial frame immediately so cameras display active telemetry without delay
+    emitStep();
+    this.simInterval = setInterval(emitStep, 100);
   }
 
   private stopSimulation() {
@@ -187,6 +206,10 @@ export class IBVAPWebSocketClient {
 
   public disconnect() {
     this.isIntentionalDisconnect = true;
+    if (this.connTimeout) {
+      clearTimeout(this.connTimeout);
+      this.connTimeout = null;
+    }
     this.stopSimulation();
     if (this.ws) {
       this.ws.onopen = null;

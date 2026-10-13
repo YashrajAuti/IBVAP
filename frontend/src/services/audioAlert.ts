@@ -24,9 +24,7 @@ class AudioAlertService {
   private initAudioElement() {
     if (typeof window === 'undefined') return;
     try {
-      const host = window.location.hostname || 'localhost';
-      const audioUrl = `http://${host}:8000/static/audios/alarm.mp3`;
-      this.audioElement = new Audio(audioUrl);
+      this.audioElement = new Audio('/audios/alarm.mp3');
       this.audioElement.preload = 'auto';
       this.audioElement.volume = this.volume;
     } catch (err) {

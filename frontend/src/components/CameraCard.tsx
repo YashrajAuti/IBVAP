@@ -34,6 +34,20 @@ const isSameCamera = (idA: string, idB: string): boolean => {
   return false;
 };
 
+const getVideoSrcForCamera = (cameraId: string): string => {
+  const upper = (cameraId || '').toUpperCase();
+  if (upper.includes('NORTH') || upper.includes('GATE') || upper.includes('01')) {
+    return '/videos/cam-north-01.mp4';
+  }
+  if (upper.includes('WEST') || upper.includes('OFFICE') || upper.includes('02')) {
+    return '/videos/cam-west-02.mp4';
+  }
+  if (upper.includes('PARKING') || upper.includes('03')) {
+    return '/videos/cam-parking-03.mp4';
+  }
+  return '/videos/cam-north-01.mp4';
+};
+
 export const CameraCard: React.FC<CameraCardProps> = ({
   camera,
   framePayload,
@@ -46,8 +60,53 @@ export const CameraCard: React.FC<CameraCardProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const activeFrameRef = useRef<WSFramePayload | null>(framePayload);
+
+  const videoSrc = getVideoSrcForCamera(camera.camera_id);
+
+  if (!imgRef.current && typeof Image !== 'undefined') {
+    imgRef.current = new Image();
+  }
+
+  // Ensure video element autoplays smoothly when processing
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.loop = true;
+
+    if (isProcessing) {
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn(`Autoplay deferred for ${camera.camera_id}:`, err);
+        });
+      }
+    } else {
+      video.pause();
+    }
+  }, [isProcessing, camera.camera_id]);
+
+  // Global user interaction gesture unlocker for video playback across mobile & desktop
+  useEffect(() => {
+    const unlockPlay = () => {
+      if (videoRef.current && isProcessing && videoRef.current.paused) {
+        videoRef.current.play().catch(() => {});
+      }
+    };
+    window.addEventListener('click', unlockPlay, { passive: true });
+    window.addEventListener('touchstart', unlockPlay, { passive: true });
+    return () => {
+      window.removeEventListener('click', unlockPlay);
+      window.removeEventListener('touchstart', unlockPlay);
+    };
+  }, [isProcessing]);
 
   // Synchronize incoming frame payload specifically for this camera ID
   useEffect(() => {
@@ -84,10 +143,51 @@ export const CameraCard: React.FC<CameraCardProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const drawOverlays = (targetCtx: CanvasRenderingContext2D, pl: WSFramePayload) => {
+    const drawTraditionalCCTVOSD = (targetCtx: CanvasRenderingContext2D) => {
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10);
+      const timeStr = now.toTimeString().slice(0, 8);
+      const msStr = String(Math.floor(now.getMilliseconds() / 10)).padStart(2, '0');
+      const fullTimestamp = `${dateStr}  ${timeStr}.${msStr}`;
+
+      targetCtx.save();
+      targetCtx.font = 'bold 13px "Courier New", monospace, sans-serif';
+      targetCtx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+      targetCtx.shadowBlur = 3;
+      targetCtx.shadowOffsetX = 1;
+      targetCtx.shadowOffsetY = 1;
+
+      // Camera identification
+      targetCtx.fillStyle = '#f8fafc';
+      targetCtx.fillText(`${camera.camera_id} ${camera.name ? `[${camera.name.toUpperCase()}]` : ''}`, 16, 26);
+
+      // Top-right: Timestamp
+      const tsWidth = targetCtx.measureText(fullTimestamp).width;
+      targetCtx.fillText(fullTimestamp, canvas.width - tsWidth - 16, 26);
+
+      // Blinking REC dot
+      const isBlinkOn = Math.floor(Date.now() / 600) % 2 === 0;
+      if (isBlinkOn) {
+        targetCtx.beginPath();
+        targetCtx.arc(canvas.width - tsWidth - 28, 22, 4.5, 0, Math.PI * 2);
+        targetCtx.fillStyle = '#ef4444';
+        targetCtx.shadowColor = '#ef4444';
+        targetCtx.shadowBlur = 6;
+        targetCtx.fill();
+      }
+
+      // Bottom-left: Camera specs & FPS
+      targetCtx.font = '11px "Courier New", monospace, sans-serif';
+      targetCtx.fillStyle = '#94a3b8';
+      targetCtx.fillText(`${camera.location.toUpperCase()} | 30 FPS | 1080P SURVEILLANCE`, 16, canvas.height - 14);
+
+      targetCtx.restore();
+    };
+
+    const drawOverlays = (targetCtx: CanvasRenderingContext2D, pl: WSFramePayload | null) => {
       if (!isAIMode) return;
-      const origW = pl.frame_width || 1920;
-      const origH = pl.frame_height || 1080;
+      const origW = pl?.frame_width || 1920;
+      const origH = pl?.frame_height || 1080;
       const scaleX = canvas.width / origW;
       const scaleY = canvas.height / origH;
 
@@ -102,10 +202,10 @@ export const CameraCard: React.FC<CameraCardProps> = ({
         targetCtx.lineTo(1280 * scaleX, 1080 * scaleY);
         targetCtx.lineTo(1000 * scaleX, 1080 * scaleY);
         targetCtx.closePath();
-        targetCtx.fillStyle = isAlarmActive ? 'rgba(244, 63, 94, 0.28)' : 'rgba(244, 63, 94, 0.16)';
+        targetCtx.fillStyle = isAlarmActive ? 'rgba(244, 63, 94, 0.32)' : 'rgba(244, 63, 94, 0.16)';
         targetCtx.fill();
-        targetCtx.strokeStyle = '#f43f5e';
-        targetCtx.lineWidth = 1.8;
+        targetCtx.strokeStyle = isAlarmActive ? '#ff0055' : '#f43f5e';
+        targetCtx.lineWidth = 2;
         targetCtx.setLineDash([4, 4]);
         targetCtx.stroke();
         targetCtx.setLineDash([]);
@@ -127,7 +227,7 @@ export const CameraCard: React.FC<CameraCardProps> = ({
       }
 
       // Render AI Detection Bounding Boxes & Tracks
-      if (pl.active_tracks) {
+      if (pl?.active_tracks && pl.active_tracks.length > 0) {
         pl.active_tracks.forEach((track) => {
           const [x1, y1, x2, y2] = track.bbox;
           const rx1 = x1 * scaleX;
@@ -173,52 +273,43 @@ export const CameraCard: React.FC<CameraCardProps> = ({
 
     const renderLoop = () => {
       const payload = activeFrameRef.current;
+      const video = videoRef.current;
 
-      if (!isProcessing || !payload || !isSameCamera(payload.camera_id, camera.camera_id)) {
-        // Dark Offline / Connecting State
+      if (!isProcessing) {
+        // Paused State
         ctx.fillStyle = '#060913';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
-        ctx.lineWidth = 1;
-        for (let x = 0; x < canvas.width; x += 40) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, canvas.height);
-          ctx.stroke();
-        }
-        for (let y = 0; y < canvas.height; y += 40) {
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(canvas.width, y);
-          ctx.stroke();
-        }
-
-        ctx.fillStyle = isProcessing ? '#f59e0b' : '#ef4444';
+        ctx.fillStyle = '#ef4444';
         ctx.font = 'bold 13px Outfit, sans-serif';
-        const statusMsg = isProcessing ? `CONNECTING TO ${camera.camera_id}...` : 'STREAM PAUSED';
-        ctx.fillText(statusMsg, 16, 30);
-
+        ctx.fillText('STREAM PAUSED', 16, 30);
         animId = requestAnimationFrame(renderLoop);
         return;
       }
 
-      if (payload.frame_b64) {
-        // Draw JPEG Base64 Frame
-        const img = new Image();
-        img.src = `data:image/jpeg;base64,${payload.frame_b64}`;
-        img.onload = () => {
-          if (!isSameCamera(payload.camera_id, camera.camera_id)) return;
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          drawOverlays(ctx, payload);
-        };
-      } else {
-        // Tactical Radar Display when streaming telemetry without JPEG video
-        ctx.fillStyle = '#070b16';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      let frameDrawn = false;
 
-        ctx.strokeStyle = 'rgba(6, 182, 212, 0.08)';
+      // 1. Live Base64 JPEG frame if connected to real Python backend
+      if (payload && payload.frame_b64) {
+        if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+          ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
+          frameDrawn = true;
+        }
+        if (imgRef.current && imgRef.current.src !== `data:image/jpeg;base64,${payload.frame_b64}`) {
+          imgRef.current.src = `data:image/jpeg;base64,${payload.frame_b64}`;
+        }
+      }
+
+      // 2. Continuous Video Feed from bundled MP4 surveillance asset
+      if (!frameDrawn && video && video.readyState >= 2) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        frameDrawn = true;
+      }
+
+      // 3. Fallback buffering canvas if video hasn't loaded first frame yet
+      if (!frameDrawn) {
+        ctx.fillStyle = '#060913';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
         ctx.lineWidth = 1;
         for (let x = 0; x < canvas.width; x += 40) {
           ctx.beginPath();
@@ -232,12 +323,16 @@ export const CameraCard: React.FC<CameraCardProps> = ({
           ctx.lineTo(canvas.width, y);
           ctx.stroke();
         }
-
-        ctx.fillStyle = 'rgba(6, 182, 212, 0.6)';
-        ctx.font = 'bold 11px Inter, sans-serif';
-        ctx.fillText(`● TELEMETRY STREAM ACTIVE [${camera.camera_id}]`, 16, 26);
-
-        drawOverlays(ctx, payload);
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = 'bold 12px monospace';
+        ctx.fillText(`BUFFERING ${camera.camera_id}...`, 20, 30);
+      } else {
+        // Frame successfully drawn! Now render overlays
+        if (isAIMode) {
+          drawOverlays(ctx, payload);
+        } else {
+          drawTraditionalCCTVOSD(ctx);
+        }
       }
 
       animId = requestAnimationFrame(renderLoop);
@@ -245,7 +340,7 @@ export const CameraCard: React.FC<CameraCardProps> = ({
 
     renderLoop();
     return () => cancelAnimationFrame(animId);
-  }, [isProcessing, camera.camera_id, isAlarmActive, isAIMode]);
+  }, [isProcessing, camera.camera_id, camera.name, camera.location, isAlarmActive, isAIMode]);
 
   const activeTracksCount = framePayload?.stats?.active_track_count || 0;
   const fps = isProcessing ? 30 : 0;
@@ -361,6 +456,24 @@ export const CameraCard: React.FC<CameraCardProps> = ({
 
       {/* 2. Video Viewport Container */}
       <div style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0, background: '#000' }}>
+        <video
+          ref={videoRef}
+          src={videoSrc}
+          playsInline
+          muted
+          autoPlay
+          loop
+          preload="auto"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '1px',
+            height: '1px',
+            opacity: 0.001,
+            pointerEvents: 'none'
+          }}
+        />
         <canvas
           ref={canvasRef}
           width={960}
