@@ -84,10 +84,97 @@ export const CameraCard: React.FC<CameraCardProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    const drawOverlays = (targetCtx: CanvasRenderingContext2D, pl: WSFramePayload) => {
+      if (!isAIMode) return;
+      const origW = pl.frame_width || 1920;
+      const origH = pl.frame_height || 1080;
+      const scaleX = canvas.width / origW;
+      const scaleY = canvas.height / origH;
+
+      const isCam3 = isSameCamera(camera.camera_id, 'CAM-PARKING-03');
+      const isCam1 = isSameCamera(camera.camera_id, 'CAM-NORTH-01');
+
+      // Draw Spatial Zone & Line Overlays
+      if (isCam3) {
+        targetCtx.beginPath();
+        targetCtx.moveTo(1000 * scaleX, 720 * scaleY);
+        targetCtx.lineTo(1280 * scaleX, 720 * scaleY);
+        targetCtx.lineTo(1280 * scaleX, 1080 * scaleY);
+        targetCtx.lineTo(1000 * scaleX, 1080 * scaleY);
+        targetCtx.closePath();
+        targetCtx.fillStyle = isAlarmActive ? 'rgba(244, 63, 94, 0.28)' : 'rgba(244, 63, 94, 0.16)';
+        targetCtx.fill();
+        targetCtx.strokeStyle = '#f43f5e';
+        targetCtx.lineWidth = 1.8;
+        targetCtx.setLineDash([4, 4]);
+        targetCtx.stroke();
+        targetCtx.setLineDash([]);
+
+        targetCtx.fillStyle = '#f43f5e';
+        targetCtx.font = 'bold 10px Outfit, sans-serif';
+        targetCtx.fillText('RESTRICTED PARKING ZONE', 1005 * scaleX, 740 * scaleY);
+      } else if (isCam1) {
+        targetCtx.beginPath();
+        targetCtx.moveTo(350 * scaleX, 100 * scaleY);
+        targetCtx.lineTo(350 * scaleX, 800 * scaleY);
+        targetCtx.strokeStyle = '#06b6d4';
+        targetCtx.lineWidth = 2;
+        targetCtx.stroke();
+
+        targetCtx.fillStyle = '#06b6d4';
+        targetCtx.font = 'bold 10px Outfit, sans-serif';
+        targetCtx.fillText('CHECKPOINT LINE A → B', 355 * scaleX, 120 * scaleY);
+      }
+
+      // Render AI Detection Bounding Boxes & Tracks
+      if (pl.active_tracks) {
+        pl.active_tracks.forEach((track) => {
+          const [x1, y1, x2, y2] = track.bbox;
+          const rx1 = x1 * scaleX;
+          const ry1 = y1 * scaleY;
+          const rw = (x2 - x1) * scaleX;
+          const rh = (y2 - y1) * scaleY;
+
+          const isPerson = track.class_name === 'person';
+          const strokeColor = isPerson ? '#3b82f6' : '#10b981';
+
+          targetCtx.strokeStyle = strokeColor;
+          targetCtx.lineWidth = 1.8;
+          targetCtx.strokeRect(rx1, ry1, rw, rh);
+
+          // Tracking point dot
+          const [bcX, bcY] = track.bottom_center;
+          targetCtx.beginPath();
+          targetCtx.arc(bcX * scaleX, bcY * scaleY, 3, 0, Math.PI * 2);
+          targetCtx.fillStyle = '#f59e0b';
+          targetCtx.fill();
+
+          // Track Tag
+          const label = `${track.class_name.toUpperCase()} #${track.id}`;
+          targetCtx.fillStyle = strokeColor;
+          const tw = targetCtx.measureText(label).width + 6;
+          targetCtx.fillRect(rx1, Math.max(0, ry1 - 16), tw, 16);
+          targetCtx.fillStyle = '#ffffff';
+          targetCtx.font = 'bold 9px Inter, sans-serif';
+          targetCtx.fillText(label, rx1 + 3, Math.max(11, ry1 - 4));
+
+          // ANPR Plate Tag
+          if (track.plate) {
+            const plateLabel = `PLATE: ${track.plate}`;
+            targetCtx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+            targetCtx.fillRect(rx1, ry1 + rh + 2, targetCtx.measureText(plateLabel).width + 6, 16);
+            targetCtx.fillStyle = '#06b6d4';
+            targetCtx.font = 'bold 10px Inter, sans-serif';
+            targetCtx.fillText(plateLabel, rx1 + 3, ry1 + rh + 13);
+          }
+        });
+      }
+    };
+
     const renderLoop = () => {
       const payload = activeFrameRef.current;
 
-      if (!isProcessing || !payload || !payload.frame_b64 || !isSameCamera(payload.camera_id, camera.camera_id)) {
+      if (!isProcessing || !payload || !isSameCamera(payload.camera_id, camera.camera_id)) {
         // Dark Offline / Connecting State
         ctx.fillStyle = '#060913';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -116,102 +203,42 @@ export const CameraCard: React.FC<CameraCardProps> = ({
         return;
       }
 
-      // Draw JPEG Base64 Frame
-      const img = new Image();
-      img.src = `data:image/jpeg;base64,${payload.frame_b64}`;
-      img.onload = () => {
-        if (!isSameCamera(payload.camera_id, camera.camera_id)) return;
+      if (payload.frame_b64) {
+        // Draw JPEG Base64 Frame
+        const img = new Image();
+        img.src = `data:image/jpeg;base64,${payload.frame_b64}`;
+        img.onload = () => {
+          if (!isSameCamera(payload.camera_id, camera.camera_id)) return;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          drawOverlays(ctx, payload);
+        };
+      } else {
+        // Tactical Radar Display when streaming telemetry without JPEG video
+        ctx.fillStyle = '#070b16';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        // Only render AI Overlays (Zones, Bounding Boxes, Tracks, ANPR) in AI Specialized Mode
-        if (isAIMode) {
-          const origW = payload.frame_width || 1920;
-          const origH = payload.frame_height || 1080;
-          const scaleX = canvas.width / origW;
-          const scaleY = canvas.height / origH;
-
-          const isCam3 = isSameCamera(camera.camera_id, 'CAM-PARKING-03');
-          const isCam1 = isSameCamera(camera.camera_id, 'CAM-NORTH-01');
-
-          // Draw Spatial Zone & Line Overlays
-          if (isCam3) {
-            ctx.beginPath();
-            ctx.moveTo(1000 * scaleX, 720 * scaleY);
-            ctx.lineTo(1280 * scaleX, 720 * scaleY);
-            ctx.lineTo(1280 * scaleX, 1080 * scaleY);
-            ctx.lineTo(1000 * scaleX, 1080 * scaleY);
-            ctx.closePath();
-            ctx.fillStyle = isAlarmActive ? 'rgba(244, 63, 94, 0.28)' : 'rgba(244, 63, 94, 0.16)';
-            ctx.fill();
-            ctx.strokeStyle = '#f43f5e';
-            ctx.lineWidth = 1.8;
-            ctx.setLineDash([4, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            ctx.fillStyle = '#f43f5e';
-            ctx.font = 'bold 10px Outfit, sans-serif';
-            ctx.fillText('RESTRICTED PARKING ZONE', 1005 * scaleX, 740 * scaleY);
-          } else if (isCam1) {
-            ctx.beginPath();
-            ctx.moveTo(350 * scaleX, 100 * scaleY);
-            ctx.lineTo(350 * scaleX, 800 * scaleY);
-            ctx.strokeStyle = '#06b6d4';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-
-            ctx.fillStyle = '#06b6d4';
-            ctx.font = 'bold 10px Outfit, sans-serif';
-            ctx.fillText('CHECKPOINT LINE A → B', 355 * scaleX, 120 * scaleY);
-          }
-
-          // Render AI Detection Bounding Boxes & Tracks
-          if (payload.active_tracks) {
-            payload.active_tracks.forEach((track) => {
-              const [x1, y1, x2, y2] = track.bbox;
-              const rx1 = x1 * scaleX;
-              const ry1 = y1 * scaleY;
-              const rw = (x2 - x1) * scaleX;
-              const rh = (y2 - y1) * scaleY;
-
-              const isPerson = track.class_name === 'person';
-              const strokeColor = isPerson ? '#3b82f6' : '#10b981';
-
-              ctx.strokeStyle = strokeColor;
-              ctx.lineWidth = 1.8;
-              ctx.strokeRect(rx1, ry1, rw, rh);
-
-              // Tracking point dot
-              const [bcX, bcY] = track.bottom_center;
-              ctx.beginPath();
-              ctx.arc(bcX * scaleX, bcY * scaleY, 3, 0, Math.PI * 2);
-              ctx.fillStyle = '#f59e0b';
-              ctx.fill();
-
-              // Track Tag
-              const label = `${track.class_name.toUpperCase()} #${track.id}`;
-              ctx.fillStyle = strokeColor;
-              const tw = ctx.measureText(label).width + 6;
-              ctx.fillRect(rx1, Math.max(0, ry1 - 16), tw, 16);
-              ctx.fillStyle = '#ffffff';
-              ctx.font = 'bold 9px Inter, sans-serif';
-              ctx.fillText(label, rx1 + 3, Math.max(11, ry1 - 4));
-
-              // ANPR Plate Tag
-              if (track.plate) {
-                const plateLabel = `PLATE: ${track.plate}`;
-                ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-                ctx.fillRect(rx1, ry1 + rh + 2, ctx.measureText(plateLabel).width + 6, 16);
-                ctx.fillStyle = '#06b6d4';
-                ctx.font = 'bold 10px Inter, sans-serif';
-                ctx.fillText(plateLabel, rx1 + 3, ry1 + rh + 13);
-              }
-            });
-          }
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.08)';
+        ctx.lineWidth = 1;
+        for (let x = 0; x < canvas.width; x += 40) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvas.height);
+          ctx.stroke();
         }
-      };
+        for (let y = 0; y < canvas.height; y += 40) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = 'rgba(6, 182, 212, 0.6)';
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.fillText(`● TELEMETRY STREAM ACTIVE [${camera.camera_id}]`, 16, 26);
+
+        drawOverlays(ctx, payload);
+      }
 
       animId = requestAnimationFrame(renderLoop);
     };

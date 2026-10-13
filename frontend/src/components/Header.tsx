@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Bell, BellOff, Clock, ChevronDown, Lock } from 'lucide-react';
+import { Settings, Bell, BellOff, Clock, ChevronDown, Lock, Volume2 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { audioAlertService } from '../services/audioAlert';
 
 export type AlertsMode = 'ON' | 'MUTED' | 'DISABLED';
 
@@ -26,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   theme,
   onToggleTheme,
   isAlarmActive = false,
+  onAcknowledgeAlarm,
   onOpenSettings,
   alertsMode,
   muteTimerSeconds,
@@ -170,99 +172,146 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls & Clock */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        {/* Only in AI Mode: Advanced AI Status Pills & Alerts Toggle */}
-        {isAIMode && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(6, 182, 212, 0.12)', color: 'var(--accent-cyan)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(6, 182, 212, 0.3)', fontWeight: 600 }}>
-                ● AI ACTIVE
-              </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(168, 85, 247, 0.12)', color: 'var(--accent-violet)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(168, 85, 247, 0.3)', fontWeight: 600 }}>
-                <Lock style={{ width: '10px', height: '10px' }} /> BLOCKCHAIN
-              </span>
-            </div>
+        {/* Active Alarm Banner (Visible in both CCTV and AI mode whenever alarm is triggered) */}
+        {isAlarmActive && (
+          <button
+            onClick={onAcknowledgeAlarm}
+            title="Intrusion Detected! Click to Silence & Acknowledge Alarm"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#ef4444',
+              color: '#ffffff',
+              border: '1px solid #dc2626',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              fontSize: '0.7rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              boxShadow: '0 0 14px rgba(239, 68, 68, 0.8)',
+              letterSpacing: '0.5px'
+            }}
+          >
+            <Volume2 style={{ width: '13px', height: '13px' }} />
+            🚨 ALARM ACTIVE — SILENCE
+          </button>
+        )}
 
-            {/* Master Alert System Toggle */}
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <button
-                onClick={onToggleAlertsMode}
-                title={alertsMode === 'ON' ? 'Click to Disable Alerts' : 'Click to Enable Alerts'}
+        {/* Master Alert System Toggle & Test Siren */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <button
+              onClick={onToggleAlertsMode}
+              title={alertsMode === 'ON' ? 'Click to Disable Alerts' : 'Click to Enable Alerts'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: alertsMode === 'ON' ? 'rgba(16, 185, 129, 0.15)' : alertsMode === 'MUTED' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                border: alertsMode === 'ON' ? '1px solid var(--accent-emerald)' : alertsMode === 'MUTED' ? '1px solid #f59e0b' : '1px solid var(--accent-rose)',
+                color: alertsMode === 'ON' ? 'var(--accent-emerald)' : alertsMode === 'MUTED' ? '#f59e0b' : 'var(--accent-rose)',
+                padding: '3px 8px',
+                borderRadius: '4px 0 0 4px',
+                fontWeight: 700,
+                fontSize: '0.68rem',
+                cursor: 'pointer'
+              }}
+            >
+              {alertsMode === 'ON' ? <Bell style={{ width: '11px', height: '11px' }} /> : <BellOff style={{ width: '11px', height: '11px' }} />}
+              {alertsMode === 'ON' ? 'ALERTS ON' : alertsMode === 'MUTED' ? `MUTED (${muteTimerSeconds !== null ? formatTimer(muteTimerSeconds) : 'MANUAL'})` : 'DISABLED'}
+            </button>
+
+            <button
+              onClick={() => setIsMuteMenuOpen(!isMuteMenuOpen)}
+              title="Mute Options"
+              style={{
+                background: alertsMode === 'ON' ? 'rgba(16, 185, 129, 0.15)' : alertsMode === 'MUTED' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                border: alertsMode === 'ON' ? '1px solid var(--accent-emerald)' : alertsMode === 'MUTED' ? '1px solid #f59e0b' : '1px solid var(--accent-rose)',
+                borderLeft: 'none',
+                color: alertsMode === 'ON' ? 'var(--accent-emerald)' : alertsMode === 'MUTED' ? '#f59e0b' : 'var(--accent-rose)',
+                padding: '3px 5px',
+                borderRadius: '0 4px 4px 0',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+            >
+              <ChevronDown style={{ width: '11px', height: '11px' }} />
+            </button>
+
+            {isMuteMenuOpen && (
+              <div
                 style={{
+                  position: 'absolute',
+                  top: '32px',
+                  right: 0,
+                  background: 'var(--bg-panel)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '6px',
+                  padding: '4px',
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  background: alertsMode === 'ON' ? 'rgba(16, 185, 129, 0.15)' : alertsMode === 'MUTED' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)',
-                  border: alertsMode === 'ON' ? '1px solid var(--accent-emerald)' : alertsMode === 'MUTED' ? '1px solid #f59e0b' : '1px solid var(--accent-rose)',
-                  color: alertsMode === 'ON' ? 'var(--accent-emerald)' : alertsMode === 'MUTED' ? '#f59e0b' : 'var(--accent-rose)',
-                  padding: '3px 8px',
-                  borderRadius: '4px 0 0 4px',
-                  fontWeight: 700,
-                  fontSize: '0.68rem',
-                  cursor: 'pointer'
+                  flexDirection: 'column',
+                  gap: '2px',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+                  zIndex: 100,
+                  width: '140px'
                 }}
               >
-                {alertsMode === 'ON' ? <Bell style={{ width: '11px', height: '11px' }} /> : <BellOff style={{ width: '11px', height: '11px' }} />}
-                {alertsMode === 'ON' ? 'ALERTS ON' : alertsMode === 'MUTED' ? `MUTED (${muteTimerSeconds !== null ? formatTimer(muteTimerSeconds) : 'MANUAL'})` : 'DISABLED'}
-              </button>
-
-              <button
-                onClick={() => setIsMuteMenuOpen(!isMuteMenuOpen)}
-                title="Mute Options"
-                style={{
-                  background: alertsMode === 'ON' ? 'rgba(16, 185, 129, 0.15)' : alertsMode === 'MUTED' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)',
-                  border: alertsMode === 'ON' ? '1px solid var(--accent-emerald)' : alertsMode === 'MUTED' ? '1px solid #f59e0b' : '1px solid var(--accent-rose)',
-                  borderLeft: 'none',
-                  color: alertsMode === 'ON' ? 'var(--accent-emerald)' : alertsMode === 'MUTED' ? '#f59e0b' : 'var(--accent-rose)',
-                  padding: '3px 5px',
-                  borderRadius: '0 4px 4px 0',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-              >
-                <ChevronDown style={{ width: '11px', height: '11px' }} />
-              </button>
-
-              {isMuteMenuOpen && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '32px',
-                    right: 0,
-                    background: 'var(--bg-panel)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '6px',
-                    padding: '4px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px',
-                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
-                    zIndex: 100,
-                    width: '140px'
-                  }}
+                <button
+                  onClick={() => { onSetTemporaryMute(60); setIsMuteMenuOpen(false); }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', textAlign: 'left', padding: '4px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
                 >
-                  <button
-                    onClick={() => { onSetTemporaryMute(60); setIsMuteMenuOpen(false); }}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', textAlign: 'left', padding: '4px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <Clock style={{ width: '11px', height: '11px' }} /> 1 Minute
-                  </button>
-                  <button
-                    onClick={() => { onSetTemporaryMute(300); setIsMuteMenuOpen(false); }}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', textAlign: 'left', padding: '4px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <Clock style={{ width: '11px', height: '11px' }} /> 5 Minutes
-                  </button>
-                  <button
-                    onClick={() => { onSetTemporaryMute(null); setIsMuteMenuOpen(false); }}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', textAlign: 'left', padding: '4px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <BellOff style={{ width: '11px', height: '11px' }} /> Until Enabled
-                  </button>
-                </div>
-              )}
-            </div>
-          </>
+                  <Clock style={{ width: '11px', height: '11px' }} /> 1 Minute
+                </button>
+                <button
+                  onClick={() => { onSetTemporaryMute(300); setIsMuteMenuOpen(false); }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', textAlign: 'left', padding: '4px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Clock style={{ width: '11px', height: '11px' }} /> 5 Minutes
+                </button>
+                <button
+                  onClick={() => { onSetTemporaryMute(null); setIsMuteMenuOpen(false); }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', textAlign: 'left', padding: '4px 6px', borderRadius: '3px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <BellOff style={{ width: '11px', height: '11px' }} /> Until Enabled
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => audioAlertService.testAlarm()}
+            title="Test Siren Sound & Unlock Browser Audio"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: 'rgba(56, 189, 248, 0.12)',
+              border: '1px solid var(--accent-cyan)',
+              color: 'var(--accent-cyan)',
+              padding: '3px 8px',
+              borderRadius: '4px',
+              fontWeight: 700,
+              fontSize: '0.68rem',
+              cursor: 'pointer'
+            }}
+          >
+            <Volume2 style={{ width: '11px', height: '11px' }} />
+            TEST SIREN
+          </button>
+        </div>
+
+        {/* AI Mode Pills */}
+        {isAIMode && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(6, 182, 212, 0.12)', color: 'var(--accent-cyan)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(6, 182, 212, 0.3)', fontWeight: 600 }}>
+              ● AI ACTIVE
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(168, 85, 247, 0.12)', color: 'var(--accent-violet)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(168, 85, 247, 0.3)', fontWeight: 600 }}>
+              <Lock style={{ width: '10px', height: '10px' }} /> BLOCKCHAIN
+            </span>
+          </div>
         )}
 
         {/* Real-time Clock */}

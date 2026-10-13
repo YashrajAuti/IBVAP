@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Settings, Sliders, Monitor, Bell, Camera, Save, RotateCcw, Check } from 'lucide-react';
+import { Settings, Sliders, Monitor, Bell, Camera, Save, RotateCcw, Check, Volume2 } from 'lucide-react';
 import { LayoutMode } from './LayoutSelector';
+import { audioAlertService } from '../services/audioAlert';
 
 export interface SystemSettings {
   systemName: string;
@@ -455,6 +456,32 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   />
                   Trigger Priority Focus Mode on Critical Intrusions
                 </label>
+
+                <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <button
+                    type="button"
+                    onClick={() => audioAlertService.testAlarm()}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      background: 'var(--accent-cyan-glow)',
+                      border: '1px solid var(--accent-cyan)',
+                      color: 'var(--accent-cyan)',
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      fontWeight: 700,
+                      fontSize: '0.78rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Volume2 style={{ width: '15px', height: '15px' }} />
+                    Test Siren Audio
+                  </button>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                    Plays a 1.5s emergency siren test to verify speakers & browser audio unlock.
+                  </span>
+                </div>
               </div>
             </div>
           )}

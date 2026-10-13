@@ -190,6 +190,9 @@ async def run_camera_stream_worker(camera_id: str, video_source: str, is_vehicle
 
             # 3. Spatial Zone & Intrusions Evaluation
             zone_res = zone_mgr.process_frame(tracked_payload)
+            has_spatial_events = len(zone_res.events) > 0
+            is_cam_alarm_active = is_person_in_restricted_zone if is_parking_cam else has_spatial_events
+
             for spatial_evt in zone_res.events:
                 evt_type = spatial_evt.event_type
 
@@ -209,9 +212,9 @@ async def run_camera_stream_worker(camera_id: str, video_source: str, is_vehicle
                     "camera_id": camera_id,
                     "track_id": spatial_evt.track_id,
                     "object_type": spatial_evt.object_class,
-                    "severity": "CRITICAL" if evt_type in ["RESTRICTED_ZONE_ENTRY", "SUSPICIOUS_VEHICLE_ACCESS"] else "INFO",
+                    "severity": "CRITICAL" if evt_type in ["RESTRICTED_ZONE_ENTRY", "SUSPICIOUS_VEHICLE_ACCESS", "LINE_CROSSING"] else "INFO",
                     "timestamp": spatial_evt.timestamp,
-                    "alarm_active": is_person_in_restricted_zone if is_parking_cam else False,
+                    "alarm_active": is_cam_alarm_active,
                     "iso_timestamp": asyncio.get_event_loop().time()
                 }
                 await ws_manager.broadcast(evt_payload)
@@ -240,7 +243,7 @@ async def run_camera_stream_worker(camera_id: str, video_source: str, is_vehicle
                 "frame_height": frame_data.height,
                 "frame_b64": frame_b64,
                 "active_tracks": active_tracks_data,
-                "alarm_active": is_person_in_restricted_zone if is_parking_cam else False,
+                "alarm_active": is_cam_alarm_active,
                 "stats": {
                     "active_track_count": active_track_count,
                     "person_count": person_count,

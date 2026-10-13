@@ -16,6 +16,7 @@ import { AlertsView } from './components/AlertsView';
 import { ZonesView } from './components/ZonesView';
 import { EventsView } from './components/EventsView';
 import { SettingsPanel, SystemSettings, DEFAULT_SETTINGS } from './components/SettingsPanel';
+import { audioAlertService } from './services/audioAlert';
 
 import { IBVAPWebSocketClient, WSMessage, CameraStatsPayload, WSFramePayload } from './services/websocket';
 import {
@@ -26,8 +27,6 @@ import {
   DetectionEvent,
   ANPRRecord
 } from './services/api';
-
-const isCam3 = (id: string) => id === 'CAM-PARKING-03' || id.includes('PARKING');
 
 export const App: React.FC = () => {
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -68,7 +67,6 @@ export const App: React.FC = () => {
   const [priorityCameraId, setPriorityCameraId] = useState<string | null>(null);
   const [acknowledgedIds, setAcknowledgedIds] = useState<Set<string | number>>(new Set());
 
-  const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
   const lastAlarmTimesRef = useRef<Record<string, number>>({});
 
   // Operating Mode: Traditional CCTV (default false) vs AI Specialized (true)
@@ -146,18 +144,10 @@ export const App: React.FC = () => {
   }, [alertsMode, muteTimerSeconds]);
 
   useEffect(() => {
-    const audioHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost';
-    const audioUrl = `http://${audioHost}:8000/static/audios/alarm.mp3`;
-    const audio = new Audio(audioUrl);
-    audio.loop = false;
-    audio.preload = 'auto';
-    alarmAudioRef.current = audio;
-
+    // Initialize audio alert listener & volume
+    audioAlertService.setupUnlockListeners();
     return () => {
-      if (alarmAudioRef.current) {
-        alarmAudioRef.current.pause();
-        alarmAudioRef.current = null;
-      }
+      audioAlertService.stopAlarm();
     };
   }, []);
 
@@ -176,35 +166,32 @@ export const App: React.FC = () => {
   }, []);
 
   const triggerAlarmEvent = (camId: string, trackId: number | null, eventType: string, isCritical: boolean) => {
-    // Only trigger alarms and audio alerts in AI Specialized Mode
-    if (!isAIModeRef.current) {
-      return;
-    }
-    if (camId === 'CAM-WEST-02' || camId === 'CAM-OFFICE-02' || camId.includes('WEST') || camId.includes('OFFICE')) {
-      return;
-    }
+    // Honor master alert switches
     if (alertsMode === 'DISABLED' || alertsMode === 'MUTED' || !settings.masterAlertsEnabled) {
       return;
     }
+
+    // Debounce to prevent overlapping cacophony (3.5s cooldown per camera/event)
     const identityKey = `${camId}_${trackId || 0}_${eventType}`;
     const now = Date.now();
     const lastTime = lastAlarmTimesRef.current[identityKey] || 0;
-    if (now - lastTime < 15000) return;
+    if (now - lastTime < 3500) return;
     lastAlarmTimesRef.current[identityKey] = now;
 
     if (isCritical || settings.criticalAlertsEnabled) {
       setPriorityCameraId(camId);
     }
-    if (settings.alarmSoundEnabled && alarmAudioRef.current) {
-      alarmAudioRef.current.currentTime = 0;
-      alarmAudioRef.current.play().catch((err) => console.warn('Audio playback error:', err));
+    if (settings.alarmSoundEnabled) {
+      audioAlertService.playAlarm(4000);
     }
   };
 
   useEffect(() => {
+    const envWs = import.meta.env.VITE_WS_URL as string;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.hostname || 'localhost';
-    const wsUrl = `${wsProtocol}//${wsHost}:8000/ws/live`;
+    const wsPort = window.location.port === '3000' || !window.location.port ? ':8000' : `:${window.location.port}`;
+    const wsUrl = envWs || `${wsProtocol}//${wsHost}${wsPort}/ws/live`;
 
     const client = new IBVAPWebSocketClient(wsUrl, (msg: WSMessage) => {
       if (msg.type === 'frame_update') {
@@ -213,8 +200,8 @@ export const App: React.FC = () => {
         if (msg.stats) {
           setCameraStatsMap((prev) => ({ ...prev, [camId]: msg.stats! }));
         }
-        if (isCam3(camId) && msg.alarm_active) {
-          triggerAlarmEvent(camId, 7, 'SUSPICIOUS_ACTIVITY', true);
+        if (msg.alarm_active) {
+          triggerAlarmEvent(camId, null, 'RESTRICTED_ZONE_INTRUSION', true);
         }
       } else if (msg.type === 'spatial_event') {
         const newEvt: DetectionEvent = {
@@ -231,7 +218,9 @@ export const App: React.FC = () => {
           created_at: new Date().toISOString()
         };
         setEvents((prev) => [newEvt, ...prev.slice(0, 99)]);
-        if (msg.severity === 'CRITICAL') {
+        const shouldRing = msg.severity === 'CRITICAL' || msg.severity === 'WARNING' ||
+          ['RESTRICTED_ZONE_ENTRY', 'SUSPICIOUS_VEHICLE_ACCESS', 'LINE_CROSSING'].includes(msg.event_type);
+        if (shouldRing) {
           triggerAlarmEvent(msg.camera_id, msg.track_id, msg.event_type, true);
         }
       }
@@ -246,10 +235,7 @@ export const App: React.FC = () => {
       setAcknowledgedIds((prev) => new Set([...prev, eventId]));
     }
     setPriorityCameraId(null);
-    if (alarmAudioRef.current) {
-      alarmAudioRef.current.pause();
-      alarmAudioRef.current.currentTime = 0;
-    }
+    audioAlertService.stopAlarm();
   };
 
   const handleANPRSearch = async (query: string) => {
@@ -304,7 +290,7 @@ export const App: React.FC = () => {
         theme={theme}
         onToggleTheme={toggleTheme}
         fps={isProcessing ? 30 : 0}
-        isAlarmActive={!!priorityCameraId && isAIMode}
+        isAlarmActive={!!priorityCameraId}
         onAcknowledgeAlarm={() => handleAcknowledgeAlarm()}
         onOpenSettings={() => {
           setIsAIMode(true);

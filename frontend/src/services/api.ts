@@ -43,8 +43,12 @@ export interface SpatialZone {
   created_at: string;
 }
 
-const apiHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const API_BASE = `http://${apiHost || 'localhost'}:8000/api/v1`;
+const apiHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost';
+const defaultApi = typeof window !== 'undefined' && window.location.protocol === 'https:'
+  ? `https://${apiHost}/api/v1`
+  : `http://${apiHost}:8000/api/v1`;
+
+export const API_BASE = (import.meta.env.VITE_API_URL as string) || defaultApi;
 
 export const fetchCameras = async (): Promise<Camera[]> => {
   try {
@@ -69,7 +73,12 @@ export const fetchEvents = async (severity?: string): Promise<DetectionEvent[]> 
     return await res.json();
   } catch (err) {
     console.warn('Backend offline, returning mock events:', err);
-    return [];
+    return [
+      { id: 101, event_id: 'EVT-P901', event_type: 'RESTRICTED_ZONE_ENTRY', camera_id: 'CAM-PARKING-03', track_id: 14, object_type: 'person', confidence: 0.94, severity: 'CRITICAL', timestamp: Math.floor(Date.now() / 1000) - 120, iso_timestamp: '12:02:15', created_at: new Date().toISOString() },
+      { id: 102, event_id: 'EVT-P902', event_type: 'LINE_CROSSING', camera_id: 'CAM-NORTH-01', track_id: 8, object_type: 'car', confidence: 0.91, severity: 'CRITICAL', timestamp: Math.floor(Date.now() / 1000) - 300, iso_timestamp: '11:59:10', created_at: new Date().toISOString() },
+      { id: 103, event_id: 'EVT-P903', event_type: 'SUSPICIOUS_VEHICLE_ACCESS', camera_id: 'CAM-PARKING-03', track_id: 7, object_type: 'person', confidence: 0.96, severity: 'CRITICAL', timestamp: Math.floor(Date.now() / 1000) - 480, iso_timestamp: '11:56:05', created_at: new Date().toISOString() },
+      { id: 104, event_id: 'EVT-P904', event_type: 'CROWD_LOITERING', camera_id: 'CAM-WEST-02', track_id: 22, object_type: 'person', confidence: 0.88, severity: 'WARNING', timestamp: Math.floor(Date.now() / 1000) - 720, iso_timestamp: '11:52:00', created_at: new Date().toISOString() },
+    ];
   }
 };
 
@@ -81,7 +90,11 @@ export const fetchANPRRecords = async (query?: string): Promise<ANPRRecord[]> =>
     return await res.json();
   } catch (err) {
     console.warn('Backend offline, returning mock ANPR records:', err);
-    return [];
+    return [
+      { id: 1, camera_id: 'CAM-NORTH-01', track_id: 12, plate_number: 'DL-01-AB-1234', confidence: 0.96, timestamp: Math.floor(Date.now() / 1000) - 180, created_at: new Date().toISOString() },
+      { id: 2, camera_id: 'CAM-NORTH-01', track_id: 18, plate_number: 'MH-12-DE-5678', confidence: 0.92, timestamp: Math.floor(Date.now() / 1000) - 420, created_at: new Date().toISOString() },
+      { id: 3, camera_id: 'CAM-NORTH-01', track_id: 25, plate_number: 'KA-04-XY-9012', confidence: 0.89, timestamp: Math.floor(Date.now() / 1000) - 900, created_at: new Date().toISOString() },
+    ];
   }
 };
 
